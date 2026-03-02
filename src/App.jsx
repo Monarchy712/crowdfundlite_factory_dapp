@@ -14,18 +14,19 @@ function App() {
   const [duration, setDuration] = useState("");
 
   const [campaigns, setCampaigns] = useState([]);
-  const [showPrevious, setShowPrevious] = useState(false);
+  const [loadingCampaigns, setLoadingCampaigns] = useState(false);
 
   const [loadingMap, setLoadingMap] = useState({});
   const [donationInputs, setDonationInputs] = useState({});
 
+  const [view, setView] = useState("active"); // active | previous
+
   /* ---------------- HELPERS ---------------- */
 
-  const setLoadingFor = (key, value) => {
-    setLoadingMap((prev) => ({ ...prev, [key]: value }));
-  };
+  const setLoadingFor = (k, v) =>
+    setLoadingMap((p) => ({ ...p, [k]: v }));
 
-  const nowSeconds = () => Date.now() / 1000;
+  const now = () => Date.now() / 1000;
 
   const timeLeft = (deadline) => {
     const diff = deadline * 1000 - Date.now();
@@ -33,14 +34,10 @@ function App() {
     return Math.floor(diff / 1000) + " sec";
   };
 
-  const progressPercent = (raised, goal) => {
-    const r = Number(raised);
-    const g = Number(goal);
-    if (g === 0) return 0;
-    return Math.min((r / g) * 100, 100);
-  };
+  const progressPercent = (r, g) =>
+    Math.min((Number(r) / Number(g)) * 100 || 0, 100);
 
-  /* ---------------- CONNECT WALLET ---------------- */
+  /* ---------------- CONNECT ---------------- */
 
   async function connectWallet() {
     if (!window.ethereum) return alert("Install MetaMask");
@@ -65,62 +62,60 @@ function App() {
     setFactory(factoryContract);
     setAccount(addr);
 
-    await loadCampaigns(factoryContract, sign, addr);
+    loadCampaigns(factoryContract, sign, addr);
   }
 
   /* ---------------- LOAD CAMPAIGNS ---------------- */
 
-  async function loadCampaigns(factoryContract, signer, userAddr) {
-    const addresses = await factoryContract.getCampaigns();
+  async function loadCampaigns(factoryContract, signer, user) {
+    try {
+      setLoadingCampaigns(true);
 
-    const data = await Promise.all(
-      addresses.map(async (addr) => {
-        const campaign = new ethers.Contract(
-          addr,
-          campaignAbi,
-          signer
-        );
+      const addresses = await factoryContract.getCampaigns();
 
-        const goal = await campaign.goalAmount();
-        const raised = await campaign.totalRaised();
-        const deadline = await campaign.deadline();
-        const state = await campaign.state();
-        const owner = await campaign.owner();
-        const contribution = await campaign.contributions(userAddr);
+      const data = await Promise.all(
+        addresses.map(async (addr) => {
+          const campaign = new ethers.Contract(
+            addr,
+            campaignAbi,
+            signer
+          );
 
-        return {
-          address: addr,
-          goal: ethers.formatEther(goal),
-          raised: ethers.formatEther(raised),
-          deadline: Number(deadline),
-          state: Number(state),
-          owner,
-          userContribution: Number(contribution) > 0,
-        };
-      })
-    );
+          const [goal, raised, deadline, state, owner, contrib] =
+            await Promise.all([
+              campaign.goalAmount(),
+              campaign.totalRaised(),
+              campaign.deadline(),
+              campaign.state(),
+              campaign.owner(),
+              campaign.contributions(user),
+            ]);
 
-    setCampaigns(data.reverse());
-  }
+          return {
+            address: addr,
+            goal: ethers.formatEther(goal),
+            raised: ethers.formatEther(raised),
+            deadline: Number(deadline),
+            state: Number(state),
+            owner,
+            userContribution: contrib > 0n,
+          };
+        })
+      );
 
-  /* ---------------- AUTO CONNECT ---------------- */
-
-  useEffect(() => {
-    async function autoConnect() {
-      if (!window.ethereum) return;
-
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const accounts = await provider.listAccounts();
-
-      if (accounts.length > 0) connectWallet();
+      setCampaigns(data.reverse());
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingCampaigns(false);
     }
-
-    autoConnect();
-  }, []);
+  }
 
   /* ---------------- CREATE ---------------- */
 
   async function createCampaign() {
+    if (!factory) return alert("Connect wallet first");
+
     setLoadingFor("create", true);
 
     const tx = await factory.createCampaign(goal, duration);
@@ -133,68 +128,52 @@ function App() {
     setLoadingFor("create", false);
   }
 
-  /* ---------------- CONTRIBUTE ---------------- */
+  /* ---------------- ACTIONS ---------------- */
 
   async function contribute(addr) {
     const amount = donationInputs[addr];
-
     if (!amount) return alert("Enter amount");
 
     setLoadingFor(addr, true);
 
     const campaign = new ethers.Contract(addr, campaignAbi, signer);
-
     const tx = await campaign.contribute({
       value: ethers.parseEther(amount),
     });
 
     await tx.wait();
-
     await loadCampaigns(factory, signer, account);
 
     setLoadingFor(addr, false);
   }
-
-  /* ---------------- WITHDRAW ---------------- */
 
   async function withdraw(addr) {
     setLoadingFor(addr, true);
-
     const campaign = new ethers.Contract(addr, campaignAbi, signer);
-    const tx = await campaign.withdrawFunds();
-
-    await tx.wait();
+    await (await campaign.withdrawFunds()).wait();
     await loadCampaigns(factory, signer, account);
-
     setLoadingFor(addr, false);
   }
-
-  /* ---------------- REFUND ---------------- */
 
   async function refund(addr) {
     setLoadingFor(addr, true);
-
     const campaign = new ethers.Contract(addr, campaignAbi, signer);
-    const tx = await campaign.refund();
-
-    await tx.wait();
+    await (await campaign.refund()).wait();
     await loadCampaigns(factory, signer, account);
-
     setLoadingFor(addr, false);
   }
 
-  /* ---------------- VISIBILITY LOGIC ---------------- */
+  /* ---------------- VISIBILITY ---------------- */
 
   const visibleCampaigns = campaigns.filter((c) => {
-    const active = c.state === 0 && c.deadline > nowSeconds();
-    const ownerCanWithdraw =
-      c.state === 1 && c.owner.toLowerCase() === account?.toLowerCase();
-    const userCanRefund = c.state === 2 && c.userContribution;
+    const active = c.state === 0 && c.deadline > now();
+    const isOwner =
+      c.owner.toLowerCase() === account?.toLowerCase();
+    const refundable = c.state === 2 && c.userContribution;
+    const withdrawable = c.state === 1 && isOwner;
 
-    if (showPrevious)
-      return !active && (ownerCanWithdraw || userCanRefund);
-
-    return active;
+    if (view === "active") return active;
+    return !active && (withdrawable || refundable);
   });
 
   /* ---------------- UI ---------------- */
@@ -202,18 +181,60 @@ function App() {
   return (
     <div className="container">
       <h1>CrowdFund dApp</h1>
-
       <p>Running on <b>Sepolia Testnet</b></p>
 
-      <button onClick={() => setShowPrevious(!showPrevious)}>
-        {showPrevious ? "View Active Campaigns" : "View Previous Campaigns"}
+      {!account ? (
+        <button onClick={connectWallet}>Connect Wallet</button>
+      ) : (
+        <p>
+          Connected: {account.slice(0, 6)}...
+          {account.slice(-4)}
+        </p>
+      )}
+
+      <hr />
+
+      {/* CREATE CAMPAIGN RESTORED */}
+      <h2>Create Campaign</h2>
+
+      <input
+        placeholder="Goal (ETH)"
+        value={goal}
+        onChange={(e) => setGoal(e.target.value)}
+      />
+
+      <input
+        placeholder="Duration (seconds)"
+        value={duration}
+        onChange={(e) => setDuration(e.target.value)}
+      />
+
+      <button
+        disabled={loadingMap["create"]}
+        onClick={createCampaign}
+      >
+        {loadingMap["create"] ? "Creating..." : "Create Campaign"}
       </button>
+
+      <hr />
+
+      {/* TABS */}
+      <div style={{ marginBottom: 20 }}>
+        <button onClick={() => setView("active")}>
+          Active Campaigns
+        </button>
+        <button onClick={() => setView("previous")}>
+          Previous Campaigns
+        </button>
+      </div>
+
+      {/* LOADING STATE */}
+      {loadingCampaigns && <p>Loading campaigns...</p>}
 
       <div className="grid">
         {visibleCampaigns.map((c) => {
           const loading = loadingMap[c.address];
           const percent = progressPercent(c.raised, c.goal);
-
           const isOwner =
             c.owner.toLowerCase() === account?.toLowerCase();
 
@@ -232,11 +253,9 @@ function App() {
                 />
               </div>
 
-              {/* contribute */}
               {c.state === 0 && (
                 <>
                   <input
-                    type="number"
                     placeholder="ETH amount"
                     value={donationInputs[c.address] || ""}
                     onChange={(e) =>
@@ -246,24 +265,21 @@ function App() {
                       }))
                     }
                   />
-
                   <button
                     disabled={loading}
                     onClick={() => contribute(c.address)}
                   >
-                    Contribute
+                    {loading ? "Processing..." : "Contribute"}
                   </button>
                 </>
               )}
 
-              {/* withdraw */}
               {c.state === 1 && isOwner && (
                 <button onClick={() => withdraw(c.address)}>
                   Withdraw Funds
                 </button>
               )}
 
-              {/* refund */}
               {c.state === 2 && c.userContribution && (
                 <button onClick={() => refund(c.address)}>
                   Claim Refund

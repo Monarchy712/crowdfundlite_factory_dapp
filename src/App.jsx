@@ -107,9 +107,13 @@ function App() {
       );
 
       // ✅ ONLY ACTIVE CAMPAIGNS
-      const activeCampaigns = data
-        .reverse()
-        .filter((c) => c.state === 0);
+      const now = Date.now() / 1000;
+
+const activeCampaigns = data
+  .reverse()
+  .filter(
+    (c) => c.state === 0 && c.deadline > now
+  );
 
       setCampaigns(activeCampaigns);
     } catch (err) {

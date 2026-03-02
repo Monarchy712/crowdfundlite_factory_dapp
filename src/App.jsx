@@ -18,18 +18,8 @@ function App() {
 
   /* ---------------- HELPERS ---------------- */
 
-  const setLoadingFor = (addr, value) => {
-    setLoadingMap((prev) => ({ ...prev, [addr]: value }));
-  };
-
-  const stateText = (s) =>
-    s === 0 ? "Active" : s === 1 ? "Successful" : "Failed";
-
-  const progressPercent = (raised, goal) => {
-    const r = Number(raised);
-    const g = Number(goal);
-    if (g === 0) return 0;
-    return Math.min((r / g) * 100, 100);
+  const setLoadingFor = (key, value) => {
+    setLoadingMap((prev) => ({ ...prev, [key]: value }));
   };
 
   const timeLeft = (deadline) => {
@@ -38,11 +28,15 @@ function App() {
     return Math.floor(diff / 1000) + " sec";
   };
 
-  const canContribute = (c) =>
-    c.state === 0 && timeLeft(c.deadline) !== "Ended";
+  const progressPercent = (raised, goal) => {
+    const r = Number(raised);
+    const g = Number(goal);
+    if (g === 0) return 0;
+    return Math.min((r / g) * 100, 100);
+  };
 
-  const canWithdraw = (c) => c.state === 1;
-  const canRefund = (c) => c.state === 2;
+  const isActive = (c) =>
+    c.state === 0 && timeLeft(c.deadline) !== "Ended";
 
   /* ---------------- CONNECT WALLET ---------------- */
 
@@ -51,6 +45,14 @@ function App() {
 
     const provider = new ethers.BrowserProvider(window.ethereum);
     await provider.send("eth_requestAccounts", []);
+
+    const network = await provider.getNetwork();
+
+    // Sepolia chainId = 11155111
+    if (Number(network.chainId) !== 11155111) {
+      alert("Please switch to Sepolia Testnet");
+      return;
+    }
 
     const sign = await provider.getSigner();
     const addr = await sign.getAddress();
@@ -104,8 +106,12 @@ function App() {
         })
       );
 
-      // newest first
-      setCampaigns(data.reverse());
+      // ✅ ONLY ACTIVE CAMPAIGNS
+      const activeCampaigns = data
+        .reverse()
+        .filter((c) => c.state === 0);
+
+      setCampaigns(activeCampaigns);
     } catch (err) {
       console.error(err);
     }
@@ -151,11 +157,9 @@ function App() {
     }
   }
 
-  /* ---------------- ACTIONS ---------------- */
+  /* ---------------- CONTRIBUTE ---------------- */
 
   async function contribute(addr) {
-    if (!signer) return alert("Connect wallet first");
-
     try {
       setLoadingFor(addr, true);
 
@@ -176,45 +180,25 @@ function App() {
     }
   }
 
-  async function withdraw(addr) {
-    try {
-      setLoadingFor(addr, true);
-
-      const campaign = new ethers.Contract(addr, campaignAbi, signer);
-      const tx = await campaign.withdrawFunds();
-
-      await tx.wait();
-      await loadCampaigns(factory, signer);
-    } catch (err) {
-      console.error(err);
-      alert(err.reason || err.message);
-    } finally {
-      setLoadingFor(addr, false);
-    }
-  }
-
-  async function refund(addr) {
-    try {
-      setLoadingFor(addr, true);
-
-      const campaign = new ethers.Contract(addr, campaignAbi, signer);
-      const tx = await campaign.refund();
-
-      await tx.wait();
-      await loadCampaigns(factory, signer);
-    } catch (err) {
-      console.error(err);
-      alert(err.reason || err.message);
-    } finally {
-      setLoadingFor(addr, false);
-    }
-  }
-
   /* ---------------- UI ---------------- */
 
   return (
     <div className="container">
       <h1 className="title">CrowdFund dApp</h1>
+
+      {/* ✅ Sepolia Badge */}
+      <div
+        style={{
+          marginBottom: 20,
+          padding: "8px 14px",
+          background: "#312e81",
+          borderRadius: 8,
+          display: "inline-block",
+          fontSize: 14,
+        }}
+      >
+        Running on <b>Sepolia Testnet</b>
+      </div>
 
       {!account ? (
         <button onClick={connectWallet}>Connect Wallet</button>
@@ -253,7 +237,11 @@ function App() {
 
       <hr />
 
-      <h2>Campaigns</h2>
+      <h2>Active Campaigns</h2>
+
+      {campaigns.length === 0 && (
+        <p>No active campaigns currently.</p>
+      )}
 
       <div className="grid">
         {campaigns.map((c) => {
@@ -269,18 +257,6 @@ function App() {
                 </b>
               </p>
 
-              <span
-                className={`badge ${
-                  c.state === 0
-                    ? "active"
-                    : c.state === 1
-                    ? "success"
-                    : "failed"
-                }`}
-              >
-                {stateText(c.state)}
-              </span>
-
               <p>Goal: {c.goal} ETH</p>
               <p>Raised: {c.raised} ETH</p>
               <p>Time Left: {timeLeft(c.deadline)}</p>
@@ -294,24 +270,10 @@ function App() {
 
               <div style={{ marginTop: 12 }}>
                 <button
-                  disabled={loading || !canContribute(c)}
+                  disabled={loading || !isActive(c)}
                   onClick={() => contribute(c.address)}
                 >
-                  {loading ? "Processing..." : "Contribute"}
-                </button>
-
-                <button
-                  disabled={loading || !canWithdraw(c)}
-                  onClick={() => withdraw(c.address)}
-                >
-                  Withdraw
-                </button>
-
-                <button
-                  disabled={loading || !canRefund(c)}
-                  onClick={() => refund(c.address)}
-                >
-                  Refund
+                  {loading ? "Processing..." : "Contribute (0.01 ETH)"}
                 </button>
               </div>
             </div>

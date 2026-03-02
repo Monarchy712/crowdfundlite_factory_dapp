@@ -91,7 +91,7 @@ function App() {
               campaign.contributions(user),
             ]);
 
-          // FIX #2: Calculate actual state based on deadline and raised amount
+          // Calculate actual state based on deadline and raised amount
           // Since checkCampaignStatus() is private in contract, we calculate in React
           const currentTime = Math.floor(Date.now() / 1000);
           const hasExpired = deadline <= currentTime;
@@ -132,11 +132,8 @@ function App() {
     setLoadingFor("create", true);
 
     try {
-      // FIX #1: Convert goal from ETH string to wei
-      // User enters "1" → we convert it to "1000000000000000000" wei
-      const goalInWei = ethers.parseEther(goal);
-
-      const tx = await factory.createCampaign(goalInWei, duration);
+      // Contract multiplies by 1 ether, so just pass the number as-is
+      const tx = await factory.createCampaign(goal, duration);
       await tx.wait();
 
       await loadCampaigns(factory, signer, account);
@@ -288,7 +285,7 @@ function App() {
       {/* LOADING STATE */}
       {loadingCampaigns && <p>Loading campaigns...</p>}
 
-      {/* FIX #3: Empty state message */}
+      {/* Empty state message */}
       {visibleCampaigns.length === 0 && !loadingCampaigns && (
         <p style={{ color: "#999", padding: "20px", textAlign: "center" }}>
           {view === "active"

@@ -26,12 +26,12 @@ function App() {
   const setLoadingFor = (k, v) =>
     setLoadingMap((p) => ({ ...p, [k]: v }));
 
-  const now = () => Date.now() / 1000;
+  const now = () => Math.floor(Date.now() / 1000);
 
   const timeLeft = (deadline) => {
-    const diff = deadline * 1000 - Date.now();
+    const diff = deadline - now();
     if (diff <= 0) return "Ended";
-    return Math.floor(diff / 1000) + " sec";
+    return Math.floor(diff) + " sec";
   };
 
   const progressPercent = (r, g) =>
@@ -91,12 +91,24 @@ function App() {
               campaign.contributions(user),
             ]);
 
+          // FIX #2: Calculate actual state based on deadline and raised amount
+          // Since checkCampaignStatus() is private in contract, we calculate in React
+          const currentTime = Math.floor(Date.now() / 1000);
+          const hasExpired = deadline <= currentTime;
+          const goalReached = ethers.formatEther(raised) >= ethers.formatEther(goal);
+
+          let actualState = Number(state);
+          // Override state if deadline has passed
+          if (hasExpired) {
+            actualState = goalReached ? 1 : 2; // 1=Successful, 2=Failed
+          }
+
           return {
             address: addr,
             goal: ethers.formatEther(goal),
             raised: ethers.formatEther(raised),
             deadline: Number(deadline),
-            state: Number(state),
+            state: actualState,
             owner,
             userContribution: contrib > 0n,
           };
@@ -105,7 +117,7 @@ function App() {
 
       setCampaigns(data.reverse());
     } catch (e) {
-      console.error(e);
+      console.error("Error loading campaigns:", e);
     } finally {
       setLoadingCampaigns(false);
     }
@@ -115,17 +127,28 @@ function App() {
 
   async function createCampaign() {
     if (!factory) return alert("Connect wallet first");
+    if (!goal || !duration) return alert("Please fill in all fields");
 
     setLoadingFor("create", true);
 
-    const tx = await factory.createCampaign(goal, duration);
-    await tx.wait();
+    try {
+      // FIX #1: Convert goal from ETH string to wei
+      // User enters "1" → we convert it to "1000000000000000000" wei
+      const goalInWei = ethers.parseEther(goal);
 
-    await loadCampaigns(factory, signer, account);
+      const tx = await factory.createCampaign(goalInWei, duration);
+      await tx.wait();
 
-    setGoal("");
-    setDuration("");
-    setLoadingFor("create", false);
+      await loadCampaigns(factory, signer, account);
+
+      setGoal("");
+      setDuration("");
+    } catch (e) {
+      console.error("Error creating campaign:", e);
+      alert("Failed to create campaign");
+    } finally {
+      setLoadingFor("create", false);
+    }
   }
 
   /* ---------------- ACTIONS ---------------- */
@@ -136,31 +159,51 @@ function App() {
 
     setLoadingFor(addr, true);
 
-    const campaign = new ethers.Contract(addr, campaignAbi, signer);
-    const tx = await campaign.contribute({
-      value: ethers.parseEther(amount),
-    });
+    try {
+      const campaign = new ethers.Contract(addr, campaignAbi, signer);
+      const tx = await campaign.contribute({
+        value: ethers.parseEther(amount),
+      });
 
-    await tx.wait();
-    await loadCampaigns(factory, signer, account);
-
-    setLoadingFor(addr, false);
+      await tx.wait();
+      await loadCampaigns(factory, signer, account);
+      setDonationInputs((p) => ({ ...p, [addr]: "" }));
+    } catch (e) {
+      console.error("Error contributing:", e);
+      alert("Contribution failed");
+    } finally {
+      setLoadingFor(addr, false);
+    }
   }
 
   async function withdraw(addr) {
     setLoadingFor(addr, true);
-    const campaign = new ethers.Contract(addr, campaignAbi, signer);
-    await (await campaign.withdrawFunds()).wait();
-    await loadCampaigns(factory, signer, account);
-    setLoadingFor(addr, false);
+
+    try {
+      const campaign = new ethers.Contract(addr, campaignAbi, signer);
+      await (await campaign.withdrawFunds()).wait();
+      await loadCampaigns(factory, signer, account);
+    } catch (e) {
+      console.error("Error withdrawing:", e);
+      alert("Withdrawal failed");
+    } finally {
+      setLoadingFor(addr, false);
+    }
   }
 
   async function refund(addr) {
     setLoadingFor(addr, true);
-    const campaign = new ethers.Contract(addr, campaignAbi, signer);
-    await (await campaign.refund()).wait();
-    await loadCampaigns(factory, signer, account);
-    setLoadingFor(addr, false);
+
+    try {
+      const campaign = new ethers.Contract(addr, campaignAbi, signer);
+      await (await campaign.refund()).wait();
+      await loadCampaigns(factory, signer, account);
+    } catch (e) {
+      console.error("Error refunding:", e);
+      alert("Refund failed");
+    } finally {
+      setLoadingFor(addr, false);
+    }
   }
 
   /* ---------------- VISIBILITY ---------------- */
@@ -194,23 +237,25 @@ function App() {
 
       <hr />
 
-      {/* CREATE CAMPAIGN RESTORED */}
+      {/* CREATE CAMPAIGN */}
       <h2>Create Campaign</h2>
 
       <input
         placeholder="Goal (ETH)"
         value={goal}
         onChange={(e) => setGoal(e.target.value)}
+        disabled={!account}
       />
 
       <input
         placeholder="Duration (seconds)"
         value={duration}
         onChange={(e) => setDuration(e.target.value)}
+        disabled={!account}
       />
 
       <button
-        disabled={loadingMap["create"]}
+        disabled={loadingMap["create"] || !account}
         onClick={createCampaign}
       >
         {loadingMap["create"] ? "Creating..." : "Create Campaign"}
@@ -220,16 +265,37 @@ function App() {
 
       {/* TABS */}
       <div style={{ marginBottom: 20 }}>
-        <button onClick={() => setView("active")}>
+        <button 
+          onClick={() => setView("active")}
+          style={{
+            fontWeight: view === "active" ? "bold" : "normal",
+            opacity: view === "active" ? 1 : 0.6,
+          }}
+        >
           Active Campaigns
         </button>
-        <button onClick={() => setView("previous")}>
+        <button 
+          onClick={() => setView("previous")}
+          style={{
+            fontWeight: view === "previous" ? "bold" : "normal",
+            opacity: view === "previous" ? 1 : 0.6,
+          }}
+        >
           Previous Campaigns
         </button>
       </div>
 
       {/* LOADING STATE */}
       {loadingCampaigns && <p>Loading campaigns...</p>}
+
+      {/* FIX #3: Empty state message */}
+      {visibleCampaigns.length === 0 && !loadingCampaigns && (
+        <p style={{ color: "#999", padding: "20px", textAlign: "center" }}>
+          {view === "active"
+            ? "No active campaigns at this time"
+            : "No campaigns with pending actions"}
+        </p>
+      )}
 
       <div className="grid">
         {visibleCampaigns.map((c) => {
@@ -240,7 +306,7 @@ function App() {
 
           return (
             <div key={c.address} className="card">
-              <p><b>{c.address.slice(0,8)}...{c.address.slice(-4)}</b></p>
+              <p><b>{c.address.slice(0, 8)}...{c.address.slice(-4)}</b></p>
 
               <p>Goal: {c.goal} ETH</p>
               <p>Raised: {c.raised} ETH</p>
@@ -275,14 +341,20 @@ function App() {
               )}
 
               {c.state === 1 && isOwner && (
-                <button onClick={() => withdraw(c.address)}>
-                  Withdraw Funds
+                <button 
+                  disabled={loading}
+                  onClick={() => withdraw(c.address)}
+                >
+                  {loading ? "Withdrawing..." : "Withdraw Funds"}
                 </button>
               )}
 
               {c.state === 2 && c.userContribution && (
-                <button onClick={() => refund(c.address)}>
-                  Claim Refund
+                <button 
+                  disabled={loading}
+                  onClick={() => refund(c.address)}
+                >
+                  {loading ? "Processing..." : "Claim Refund"}
                 </button>
               )}
             </div>

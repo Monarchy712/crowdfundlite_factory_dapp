@@ -1,0 +1,131 @@
+#root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: filter 300ms;
+}
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em #61dafbaa);
+}
+
+@keyframes logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite 20s linear;
+  }
+}
+
+.card {
+  padding: 2em;
+}
+
+.read-the-docs {
+  color: #888;
+}
+
+body {
+  background: #0f172a;
+  color: white;
+  margin: 0;
+  font-family: Inter, sans-serif;
+}
+
+.container {
+  max-width: 1100px;
+  margin: auto;
+  padding: 40px;
+}
+
+.title {
+  font-size: 32px;
+  font-weight: 700;
+  margin-bottom: 20px;
+}
+
+.card {
+  background: #1e293b;
+  border-radius: 14px;
+  padding: 18px;
+  margin-top: 16px;
+  transition: 0.25s;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+}
+
+.card:hover {
+  transform: translateY(-4px);
+}
+
+.grid {
+  display: grid;
+  gap: 16px;
+}
+
+input {
+  padding: 10px;
+  margin-right: 10px;
+  border-radius: 8px;
+  border: none;
+}
+
+button {
+  background: linear-gradient(135deg,#6366f1,#8b5cf6);
+  border: none;
+  padding: 10px 14px;
+  border-radius: 8px;
+  color: white;
+  cursor: pointer;
+  transition: 0.2s;
+  margin-right: 8px;
+}
+
+button:hover {
+  transform: scale(1.05);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.progress {
+  background: #334155;
+  height: 10px;
+  border-radius: 10px;
+  overflow: hidden;
+  margin-top: 10px;
+}
+
+.progress-fill {
+  background: linear-gradient(90deg,#22c55e,#4ade80);
+  height: 100%;
+  transition: width 0.4s ease;
+}
+
+.badge {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.active { background:#2563eb; }
+.success { background:#16a34a; }
+.failed { background:#dc2626; }

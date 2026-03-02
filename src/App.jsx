@@ -15,6 +15,7 @@ function App() {
 
   const [campaigns, setCampaigns] = useState([]);
   const [loadingMap, setLoadingMap] = useState({});
+  const [donationInputs, setDonationInputs] = useState({}); // ⭐ user donation amount
 
   /* ---------------- HELPERS ---------------- */
 
@@ -22,11 +23,7 @@ function App() {
     setLoadingMap((prev) => ({ ...prev, [key]: value }));
   };
 
-  const timeLeft = (deadline) => {
-    const diff = deadline * 1000 - Date.now();
-    if (diff <= 0) return "Ended";
-    return Math.floor(diff / 1000) + " sec";
-  };
+  const nowSeconds = () => Date.now() / 1000;
 
   const progressPercent = (raised, goal) => {
     const r = Number(raised);
@@ -35,8 +32,14 @@ function App() {
     return Math.min((r / g) * 100, 100);
   };
 
+  const timeLeft = (deadline) => {
+    const diff = deadline * 1000 - Date.now();
+    if (diff <= 0) return "Ended";
+    return Math.floor(diff / 1000) + " sec";
+  };
+
   const isActive = (c) =>
-    c.state === 0 && timeLeft(c.deadline) !== "Ended";
+    c.state === 0 && c.deadline > nowSeconds();
 
   /* ---------------- CONNECT WALLET ---------------- */
 
@@ -48,7 +51,7 @@ function App() {
 
     const network = await provider.getNetwork();
 
-    // Sepolia chainId = 11155111
+    // Sepolia chainId
     if (Number(network.chainId) !== 11155111) {
       alert("Please switch to Sepolia Testnet");
       return;
@@ -106,14 +109,12 @@ function App() {
         })
       );
 
-      // ✅ ONLY ACTIVE CAMPAIGNS
-      const now = Date.now() / 1000;
-
-const activeCampaigns = data
-  .reverse()
-  .filter(
-    (c) => c.state === 0 && c.deadline > now
-  );
+      // ⭐ Only ACTIVE campaigns
+      const activeCampaigns = data
+        .reverse()
+        .filter(
+          (c) => c.state === 0 && c.deadline > nowSeconds()
+        );
 
       setCampaigns(activeCampaigns);
     } catch (err) {
@@ -147,8 +148,6 @@ const activeCampaigns = data
       const tx = await factory.createCampaign(goal, duration);
       await tx.wait();
 
-      alert("Campaign Created!");
-
       await loadCampaigns(factory, signer);
 
       setGoal("");
@@ -164,18 +163,28 @@ const activeCampaigns = data
   /* ---------------- CONTRIBUTE ---------------- */
 
   async function contribute(addr) {
+    if (!signer) return alert("Connect wallet first");
+
+    const amount = donationInputs[addr];
+
+    if (!amount || Number(amount) <= 0)
+      return alert("Enter valid ETH amount");
+
     try {
       setLoadingFor(addr, true);
 
       const campaign = new ethers.Contract(addr, campaignAbi, signer);
 
       const tx = await campaign.contribute({
-        value: ethers.parseEther("0.01"),
+        value: ethers.parseEther(amount),
       });
 
       await tx.wait();
 
       await loadCampaigns(factory, signer);
+
+      // clear input after success
+      setDonationInputs((prev) => ({ ...prev, [addr]: "" }));
     } catch (err) {
       console.error(err);
       alert(err.reason || err.message);
@@ -190,7 +199,7 @@ const activeCampaigns = data
     <div className="container">
       <h1 className="title">CrowdFund dApp</h1>
 
-      {/* ✅ Sepolia Badge */}
+      {/* Sepolia Badge */}
       <div
         style={{
           marginBottom: 20,
@@ -198,7 +207,6 @@ const activeCampaigns = data
           background: "#312e81",
           borderRadius: 8,
           display: "inline-block",
-          fontSize: 14,
         }}
       >
         Running on <b>Sepolia Testnet</b>
@@ -243,9 +251,7 @@ const activeCampaigns = data
 
       <h2>Active Campaigns</h2>
 
-      {campaigns.length === 0 && (
-        <p>No active campaigns currently.</p>
-      )}
+      {campaigns.length === 0 && <p>No active campaigns.</p>}
 
       <div className="grid">
         {campaigns.map((c) => {
@@ -272,12 +278,27 @@ const activeCampaigns = data
                 />
               </div>
 
-              <div style={{ marginTop: 12 }}>
+              {/* ⭐ Donation input */}
+              <input
+                type="number"
+                step="0.001"
+                placeholder="Amount (ETH)"
+                value={donationInputs[c.address] || ""}
+                onChange={(e) =>
+                  setDonationInputs((prev) => ({
+                    ...prev,
+                    [c.address]: e.target.value,
+                  }))
+                }
+                style={{ marginTop: 12 }}
+              />
+
+              <div style={{ marginTop: 10 }}>
                 <button
                   disabled={loading || !isActive(c)}
                   onClick={() => contribute(c.address)}
                 >
-                  {loading ? "Processing..." : "Contribute (0.01 ETH)"}
+                  {loading ? "Processing..." : "Contribute"}
                 </button>
               </div>
             </div>
